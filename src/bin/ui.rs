@@ -291,10 +291,28 @@ impl eframe::App for App {
                 .num_columns(2)
                 .spacing([10.0, 6.0])
                 .show(ui, |ui| {
-                    ui.label("Apps Script ID");
+                    ui.label("Apps Script ID(s)")
+                        .on_hover_text(
+                            "One deployment ID, or several separated by commas.\n\
+                             With multiple IDs the proxy round-robins between them and\n\
+                             automatically sidelines any ID that hits its daily quota (429)\n\
+                             or other rate limits for 10 minutes before retrying it."
+                        );
                     ui.add(egui::TextEdit::singleline(&mut self.form.script_id)
+                        .hint_text("id1, id2, id3 …")
                         .desired_width(f32::INFINITY));
                     ui.end_row();
+
+                    let id_count = self.form.script_id
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .count();
+                    if id_count > 1 {
+                        ui.label("");
+                        ui.small(format!("{} IDs — round-robin with auto-failover on quota", id_count));
+                        ui.end_row();
+                    }
 
                     ui.label("Auth key");
                     ui.horizontal(|ui| {
