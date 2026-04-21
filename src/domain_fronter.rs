@@ -72,7 +72,10 @@ pub struct DomainFronter {
     cache: Arc<ResponseCache>,
     inflight: Arc<Mutex<HashMap<String, broadcast::Sender<Vec<u8>>>>>,
     coalesced: AtomicU64,
+    blacklist: Arc<std::sync::Mutex<HashMap<String, Instant>>>,
 }
+
+const BLACKLIST_COOLDOWN_SECS: u64 = 600;
 
 /// Request payload sent to Apps Script (single, non-batch).
 #[derive(Serialize)]
@@ -134,6 +137,7 @@ impl DomainFronter {
             cache: Arc::new(ResponseCache::with_default()),
             inflight: Arc::new(Mutex::new(HashMap::new())),
             coalesced: AtomicU64::new(0),
+            blacklist: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -145,9 +149,38 @@ impl DomainFronter {
         self.coalesced.load(Ordering::Relaxed)
     }
 
-    fn next_script_id(&self) -> &str {
-        let idx = self.script_idx.fetch_add(1, Ordering::Relaxed);
-        &self.script_ids[idx % self.script_ids.len()]
+    fn next_script_id(&self) -> String {
+        let n = self.script_ids.len();
+        let mut bl = self.blacklist.lock().unwrap();
+        let now = Instant::now();
+        bl.retain(|_, until| *until > now);
+
+        for _ in 0..n {
+            let idx = self.script_idx.fetch_add(1, Ordering::Relaxed);
+            let sid = &self.script_ids[idx % n];
+            if !bl.contains_key(sid) {
+                return sid.clone();
+            }
+        }
+        // All blacklisted: pick whichever comes off cooldown soonest.
+        if let Some((sid, _)) = bl.iter().min_by_key(|(_, t)| **t) {
+            let sid = sid.clone();
+            bl.remove(&sid);
+            return sid;
+        }
+        self.script_ids[0].clone()
+    }
+
+    fn blacklist_script(&self, script_id: &str, reason: &str) {
+        let until = Instant::now() + Duration::from_secs(BLACKLIST_COOLDOWN_SECS);
+        let mut bl = self.blacklist.lock().unwrap();
+        bl.insert(script_id.to_string(), until);
+        tracing::warn!(
+            "blacklisted script {} for {}s: {}",
+            mask_script_id(script_id),
+            BLACKLIST_COOLDOWN_SECS,
+            reason
+        );
     }
 
     async fn open(&self) -> Result<PooledStream, FronterError> {
@@ -305,7 +338,7 @@ impl DomainFronter {
         body: &[u8],
     ) -> Result<Vec<u8>, FronterError> {
         let payload = self.build_payload_json(method, url, headers, body)?;
-        let script_id = self.next_script_id().to_string();
+        let script_id = self.next_script_id();
         let path = format!("/macros/s/{}/exec", script_id);
 
         let mut entry = self.acquire().await?;
@@ -367,17 +400,29 @@ impl DomainFronter {
                     }
 
                     if status != 200 {
+                        let body_txt = String::from_utf8_lossy(&resp_body)
+                            .chars()
+                            .take(200)
+                            .collect::<String>();
+                        if should_blacklist(status, &body_txt) {
+                            self.blacklist_script(&script_id, &format!("HTTP {}", status));
+                        }
                         return Err(FronterError::Relay(format!(
                             "Apps Script HTTP {}: {}",
-                            status,
-                            String::from_utf8_lossy(&resp_body)
-                                .chars()
-                                .take(200)
-                                .collect::<String>()
+                            status, body_txt
                         )));
                     }
-                    let bytes = parse_relay_json(&resp_body)?;
-                    Ok::<_, FronterError>((bytes, true))
+                    match parse_relay_json(&resp_body) {
+                        Ok(bytes) => Ok::<_, FronterError>((bytes, true)),
+                        Err(e) => {
+                            if let FronterError::Relay(ref msg) = e {
+                                if looks_like_quota_error(msg) {
+                                    self.blacklist_script(&script_id, msg);
+                                }
+                            }
+                            Err(e)
+                        }
+                    }
                 }
             }
         };
@@ -727,6 +772,32 @@ fn parse_relay_json(body: &[u8]) -> Result<Vec<u8>, FronterError> {
     Ok(out)
 }
 
+fn should_blacklist(status: u16, body: &str) -> bool {
+    if status == 429 || status == 403 {
+        return true;
+    }
+    looks_like_quota_error(body)
+}
+
+fn looks_like_quota_error(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("quota")
+        || lower.contains("daily limit")
+        || lower.contains("rate limit")
+        || lower.contains("too many times")
+        || lower.contains("service invoked")
+}
+
+fn mask_script_id(id: &str) -> String {
+    let n = id.chars().count();
+    if n <= 8 {
+        return "***".into();
+    }
+    let head: String = id.chars().take(4).collect();
+    let tail: String = id.chars().skip(n - 4).collect();
+    format!("{}...{}", head, tail)
+}
+
 fn value_to_header_str(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
@@ -892,6 +963,23 @@ mod tests {
         let body = r#"{"e":"unauthorized"}"#;
         let err = parse_relay_json(body.as_bytes()).unwrap_err();
         assert!(matches!(err, FronterError::Relay(_)));
+    }
+
+    #[test]
+    fn blacklist_heuristics() {
+        assert!(should_blacklist(429, ""));
+        assert!(should_blacklist(403, "quota"));
+        assert!(should_blacklist(500, "Service invoked too many times per day: urlfetch"));
+        assert!(!should_blacklist(200, ""));
+        assert!(!should_blacklist(502, "bad gateway"));
+        assert!(looks_like_quota_error("Exception: Service invoked too many times per day"));
+        assert!(!looks_like_quota_error("bad url"));
+    }
+
+    #[test]
+    fn mask_script_id_hides_middle() {
+        assert_eq!(mask_script_id("short"), "***");
+        assert_eq!(mask_script_id("AKfycbx1234567890abcdef"), "AKfy...cdef");
     }
 
     #[test]
