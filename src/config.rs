@@ -85,11 +85,18 @@ pub struct Config {
 
     #[serde(default = "default_max_ips_to_scan")]
     pub max_ips_to_scan: usize,
+
+    #[serde(default = "default_scan_batch_size")]
+    pub scan_batch_size:usize,
+
+    #[serde(default = "default_google_ip_validation")]
+    pub google_ip_validation: bool
 }
 
 fn default_fetch_ips_from_api() -> bool { false }
 fn default_max_ips_to_scan() -> usize { 100 }
-
+fn default_scan_batch_size() -> usize {500}
+fn default_google_ip_validation() -> bool {true}
 
 fn default_google_ip() -> String {
     "216.239.38.120".into()

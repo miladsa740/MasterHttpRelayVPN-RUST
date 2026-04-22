@@ -132,7 +132,9 @@ struct FormState {
     /// Whether the floating SNI editor window is open.
     sni_editor_open: bool,
     fetch_ips_from_api: bool,
-max_ips_to_scan: usize,
+    max_ips_to_scan: usize,
+    scan_batch_size:usize,
+    google_ip_validation: bool
 }
 
 #[derive(Clone, Debug)]
@@ -180,6 +182,8 @@ fn load_form() -> FormState {
             sni_editor_open: false,
             fetch_ips_from_api:c.fetch_ips_from_api,
             max_ips_to_scan:c.max_ips_to_scan,
+            google_ip_validation: c.google_ip_validation,
+            scan_batch_size:c.scan_batch_size
         }
     } else {
         FormState {
@@ -200,6 +204,8 @@ fn load_form() -> FormState {
             sni_editor_open: false,
             fetch_ips_from_api:false,
             max_ips_to_scan:100,
+            google_ip_validation:true,
+            scan_batch_size:500
         }
     }
 }
@@ -304,8 +310,10 @@ impl FormState {
                 // on an empty pool.
                 if active.is_empty() { None } else { Some(active) }
             },
-            fetch_ips_from_api:false,
-            max_ips_to_scan: 100,
+            fetch_ips_from_api:self.fetch_ips_from_api,
+            max_ips_to_scan: self.max_ips_to_scan,
+            google_ip_validation:self.google_ip_validation,
+            scan_batch_size:self.scan_batch_size
         })
     }
 }

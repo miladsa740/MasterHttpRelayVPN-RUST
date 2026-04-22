@@ -183,7 +183,9 @@ You can enable dynamic IP discovery by setting fetch_ips_from_api to true in con
 ```json
 {
   "fetch_ips_from_api": true,
-  "max_ips_to_scan": 100
+  "max_ips_to_scan": 100,
+  "scan_batch_size":100,
+  "google_ip_validation": true // check whether ips belongs to frontend sites of google or not
 }
 ```
 
@@ -470,7 +472,9 @@ Firefox cert store خودش را جدا دارد؛ installer تلاش می‌ک�
 ```json
 {
   "fetch_ips_from_api": true,
-  "max_ips_to_scan": 100
+  "max_ips_to_scan": 100,
+  "scan_batch_size":100,
+  "google_ip_validation": true // برسی هدر های بازگشته از ایپی برای برسی هدر ها و تشخیص کاربردی بودن ایپی
 }
 ```
 
