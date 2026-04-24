@@ -407,6 +407,7 @@ These are inherent to the Apps Script + domain-fronting approach, not bugs in th
 - `auth_key` between the client and the Apps Script relay is a shared secret you pick. The server-side `Code.gs` rejects requests without a matching key.
 - Traffic between your machine and Google's edge is standard TLS 1.3.
 - What Google can see: the destination URL and headers of each request (because Apps Script fetches on your behalf). This is the same trust model as any hosted proxy — if that's not acceptable, use a self-hosted VPN instead.
+- **IP exposure caveat (`apps_script` mode):** v1.2.9 strips every `X-Forwarded-For` / `X-Real-IP` / `Forwarded` / `Via` / `CF-Connecting-IP` / `True-Client-IP` / `Fastly-Client-IP` and ~10 related identity-revealing headers from your outbound request before it reaches Apps Script (issue #104). What this **does not** cover: whatever Google's own infrastructure may add when its Apps Script runtime makes the subsequent `UrlFetchApp.fetch()` to the target site. That second leg is server-side, outside this client's control — so the destination server sees a Google datacenter IP, but there is no public guarantee Google never propagates the original caller's IP in some internal header chain. If your threat model requires that the destination site cannot under any circumstances learn your IP, **use Full Tunnel mode** (traffic exits from your own VPS, only the VPS IP is exposed end-to-end). `apps_script` mode remains fine for bypassing DPI / reaching blocked sites where "seen by Google" is acceptable. Raised in [#148](https://github.com/therealaleph/MasterHttpRelayVPN-RUST/issues/148).
 
 ## License
 
@@ -743,6 +744,7 @@ logread -e mhrv-rs -f
 - `auth_key` یک رمز اختصاصی بین شما و اسکریپت شماست. کد سرور هر درخواستی را که این رمز را نداشته باشد رد می‌کند
 - ترافیک بین شما و گوگل، `TLS 1.3` استاندارد است
 - آنچه گوگل می‌بیند: آدرس `URL` و هدرهای درخواست شما (چون `Apps Script` به‌جای شما `fetch` می‌کند). این همان سطح اعتماد هر پروکسی میزبانی‌شده است — اگر قابل قبول نیست، از `VPN` روی سرور شخصی خودتان استفاده کنید
+- **هشدار افشای `IP` در حالت `apps_script`:** نسخهٔ ۱.۲.۹ همهٔ هدرهای شناسایی‌کننده (`X-Forwarded-For`، `X-Real-IP`، `Forwarded`، `Via`، `CF-Connecting-IP`، `True-Client-IP`، `Fastly-Client-IP` و ~۱۰ هدر مشابه) را از درخواست خروجی سمت کلاینت قبل از رسیدن به `Apps Script` حذف می‌کند ([#104](https://github.com/therealaleph/MasterHttpRelayVPN-RUST/issues/104)). اما آنچه این پوشش نمی‌دهد: هر هدری که زیرساخت خود گوگل ممکن است به درخواست بعدی `UrlFetchApp.fetch()` از کلاینت اضافه کند، در اختیار این برنامه نیست. سرور مقصد `IP` دیتاسنتر گوگل را می‌بیند، اما هیچ تعهد عمومی از گوگل وجود ندارد که `IP` واقعی کاربر در زنجیرهٔ هدرهای داخلی منتشر نمی‌شود. اگر مدل تهدید شما این است که سرور مقصد تحت هیچ شرایطی نباید `IP` شما را ببیند، **از حالت `full` (تونل کامل) استفاده کنید** (ترافیک از `VPS` شخصی شما خارج می‌شود، فقط `IP` آن `VPS` دیده می‌شود). حالت `apps_script` برای دور زدن `DPI` و دسترسی به سایت‌های فیلترشده کاملاً مناسب است، اما فرض می‌کند «دیده‌شدن توسط گوگل» قابل قبول است. مطرح‌شده در [#148](https://github.com/therealaleph/MasterHttpRelayVPN-RUST/issues/148).
 
 ### اعتبار
 
